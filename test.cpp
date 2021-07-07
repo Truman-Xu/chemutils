@@ -53,7 +53,7 @@ int main( int argc , char **argv ) {
     std::string sdf_file = argv[1];
     bool unique;
     std::string isUnique(argv[2]);
-    if (isUnique == "true" || isUnique == "True") {
+    if (isUnique == "true" || isUnique == "True") { 
         unique = true;
     } else if (isUnique == "false" || isUnique == "False") {
         unique = false;
