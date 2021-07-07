@@ -1,11 +1,12 @@
 #include <iostream>
-#include <fstream>
-#include <RDGeneral/Invariant.h>
+// #include <fstream>
+#include <filesystem>
+// #include <RDGeneral/Invariant.h>
 #include <GraphMol/GraphMol.h>
 #include <GraphMol/MolOps.h>
-#include <GraphMol/SmilesParse/SmilesWrite.h>
+// #include <GraphMol/SmilesParse/SmilesWrite.h>
 #include <GraphMol/FileParsers/MolSupplier.h>
-#include <GraphMol/FileParsers/FileParsers.h>
+// #include <GraphMol/FileParsers/FileParsers.h>
 #include <GraphMol/MolAlign/AlignMolecules.h>
 #include <GraphMol/new_canon.h>
 #include <GraphMol/FileParsers/MolWriters.h>
@@ -13,6 +14,7 @@
 using namespace RDKit;
 
 typedef std::map<int, std::pair<int, int>> ORDER_DICT;
+typedef std::vector<std::shared_ptr<ROMol>> MOL_VEC;
 
 void print_map(std::map<int, std::pair<int, int>> m){
     for (const auto& [key, value] : m) {
@@ -20,97 +22,136 @@ void print_map(std::map<int, std::pair<int, int>> m){
     }
 }
 
-ORDER_DICT findHIds(std::shared_ptr<RDKit::ROMol> mol_ptr, bool unique = true){
+ORDER_DICT findHIds(std::shared_ptr<RDKit::ROMol> mol, bool unique = true){
     std::vector<unsigned int> rank;
     bool breakTies = !unique;
-    Canon::rankMolAtoms(*mol_ptr, rank, breakTies);
+    Canon::rankMolAtoms(*mol, rank, breakTies);
     ORDER_DICT orders;
     for (std::size_t j=0; j < rank.size(); j++){
-        const Atom *atom = mol_ptr->getAtomWithIdx( j );
+        const Atom *atom = mol->getAtomWithIdx( j );
         
         if (atom->getSymbol() == "H"){
             // Find the neighbor atom's id
             // There is only one neighbor exists for Hydrogen
-            ROMol::ADJ_ITER_PAIR id_pair = mol_ptr->getAtomNeighbors(atom);
-            // id of Hydrogen and its neighbor atom matching the sdf idx (H_id, Nbr_id)
-            std::pair<int, int> atom_ids{j, *id_pair.first};
-            // rank of the hydrogen and the atom id pair
-            std::pair<int, std::pair<int, int>> entry{rank[j], atom_ids};
-            // Insert in map, only unique rank of hydrogen is allowed as key 
+            ROMol::ADJ_ITER_PAIR id_pair = mol->getAtomNeighbors(atom);
+            // Insert rank of the hydrogen and the atom id pair in map,
+            // id of Hydrogen and its neighbor atom matching the sdf idx (H_id, Nbr_id).
+            // Only unique rank of hydrogen is allowed as key 
             // Will produce geometrically equivalent hydrogens if unique is false 
-            orders.insert(entry);
+            orders.insert({rank[j], {j, *id_pair.first}});
         }
     }
     return orders;
 }
 
-std::shared_ptr<ROMol> connectMols(ROMol &lig, ROMol &frag, 
+std::shared_ptr<ROMol> connectMols(std::shared_ptr<ROMol> lig, std::shared_ptr<ROMol> frag, 
     int id_ligH, int id_ligNbr, int id_fragH, int id_fragNbr)
+    
     {
-        // std::pair<int, int> H_map={id_fragH, id_ligNbr};
-        // std::pair<int, int> Nbr_map={id_fragNbr, id_ligH};
-
-        std::shared_ptr<RWMol> rw_lig( new RWMol( lig ));
-        std::shared_ptr<RWMol> rw_frag( new RWMol( frag ));
-
+        // make editable copied of the molecules
+        std::shared_ptr<RWMol> rw_lig( new RWMol( *lig ));
+        std::shared_ptr<RWMol> rw_frag( new RWMol( *frag ));
+        // map the atom to be aligned from the two mols
         const MatchVectType id_map = {{id_fragH, id_ligNbr}, {id_fragNbr, id_ligH}};
+        // frag first and lig
         double _rmsd = MolAlign::alignMol(*rw_frag, *rw_lig, -1, -1, &id_map);
         
         rw_lig->insertMol( *rw_frag );
-        rw_lig->addBond( id_ligNbr, lig.getNumAtoms() + id_fragNbr, Bond::SINGLE );
-        rw_lig->removeAtom( lig.getNumAtoms() + id_fragH );
+        rw_lig->addBond( id_ligNbr, lig->getNumAtoms() + id_fragNbr, Bond::SINGLE );
+        rw_lig->removeAtom( id_fragH + lig->getNumAtoms() );
         rw_lig->removeAtom( id_ligH );
-
         return std::shared_ptr<ROMol>( rw_lig );
 }
 
+MOL_VEC functionalizeH(std::shared_ptr<ROMol> lig,  
+    std::shared_ptr<ROMol> frag, bool unique = true)
+    /*
+    Functionalize the ligand with a fragment on all unique positions of hydrogen atoms
+    If unqiue flag is set to False, all hydrogen positions on the ligand will be used
+    for forming the bonds. 
+    Return a vector of ptrs of functionalized ligand
+    */
+    {
+        ORDER_DICT orders_lig = findHIds(lig, unique);
+        ORDER_DICT orders_frag = findHIds(frag, true);
+
+        MOL_VEC all_combined;
+        for (ORDER_DICT::iterator it=orders_lig.begin(); it!=orders_lig.end(); ++it){
+            for (ORDER_DICT::iterator jt=orders_frag.begin(); jt!=orders_frag.end(); ++jt){
+                all_combined.push_back( connectMols(lig, frag, 
+                it->second.first, it->second.second, 
+                jt->second.first, jt->second.second) );
+            }
+        }
+        return all_combined;
+}
+
+void sdfEnumFuncH(std::string lig_file, std::string frag_file, std::string out_path, bool unique=true){
+    if (std::filesystem::exists(out_path)){
+        bool takeOwnership = true;
+        bool removeHs = false;
+        MOL_VEC ligs;
+        SDMolSupplier lig_supplier( lig_file , takeOwnership , removeHs );
+        while( !lig_supplier.atEnd() ) {
+            std::shared_ptr<RDKit::ROMol> lig( lig_supplier.next() );
+            if( lig ) {
+                ligs.push_back( lig );
+            }
+        }
+
+        MOL_VEC frags;
+        SDMolSupplier frag_supplier( frag_file , takeOwnership , removeHs );
+        while( !frag_supplier.atEnd() ) {
+            std::shared_ptr<RDKit::ROMol> frag( frag_supplier.next() );
+            if( frag ) {
+                frags.push_back( frag );
+            }
+        }
+
+        for (std::size_t i=0, is=ligs.size(); i<is; i++){
+            for (std::size_t j=0, js=frags.size(); j<js; j++){
+                MOL_VEC combined = functionalizeH( ligs[i], frags[j], unique );
+                std::string fname = "combined_"+std::to_string(i)+"_"+std::to_string(j)+".sdf";
+                std::string fileout = out_path+"/"+fname;
+                SDWriter writer(fileout);
+                for( std::size_t k = 0 , ks = combined.size() ; k < ks ; ++k ) {
+                    writer.write( *combined[k] );
+                }
+            }
+        }
+        std::cout << ligs.size()*frags.size() << " Ligand-Fragament pairs generated." << std::endl;
+    } else {
+        std::cout << "[Aborted] File path not exists!" << std::endl;
+    }
+}
+
 int main( int argc , char **argv ) {
-    std::string lig_file = "/home/truman/chemutils/top10ligs.sdf";
-    std::string frag_file = "/home/truman/chemutils/all_frags.sdf";
-    bool takeOwnership = true;
-    bool removeHs = false;
-    SDMolSupplier mol_supplier_lig( lig_file , takeOwnership , removeHs );
-    std::shared_ptr<ROMol> lig( mol_supplier_lig.next() );
-    
-    SDMolSupplier mol_supplier_frag( frag_file , takeOwnership , removeHs );
-    std::shared_ptr<ROMol> frag( mol_supplier_frag.next() );
+    for (int i = 0; i < argc; ++i)
+        std::cout << argv[i] << "\n";
+
+    std::string lig_file = argv[1], frag_file = argv[2], out_path = argv[3];
+
     bool unique=true;
-    std::shared_ptr<ROMol> mol2_l( MolOps::removeHs( *lig ));
-    std::cout << "lig" << ": " << MolToSmiles(*mol2_l) << std::endl;
-    std::shared_ptr<RWMol> mol3_l( new RWMol( *lig ));
-    ORDER_DICT orders_lig = findHIds(lig, unique);
-    print_map(orders_lig);
-
-    std::shared_ptr<ROMol> mol2_f( MolOps::removeHs( *frag ));
-    std::cout << "frag" << ": " << MolToSmiles(*mol2_f) << std::endl;
-    std::shared_ptr<RWMol> mol3_f( new RWMol( *frag ));
-    ORDER_DICT orders_frag = findHIds(frag, unique);
-    print_map(orders_frag);
-
-    std::vector<std::shared_ptr<ROMol>> all_combined;
-    for (std::size_t i=0, is=orders_lig.size(); i<is; i++){
-        for (std::size_t j=0, js=orders_frag.size(); j<js; j++){
-
-            all_combined.push_back( connectMols(*lig, *frag, 
-            orders_lig[i].first, orders_lig[i].second, 
-            orders_frag[j].first, orders_frag[j].second) );
+    std::string isUnique;
+    if(argc>3){
+        isUnique = argv[4];
+        if (isUnique == "true" || isUnique == "True") { 
+            unique = true;
+        } else if (isUnique == "false" || isUnique == "False") {
+            unique = false;
+        } else {
+            // Report invalid argument
+            std::cout << "Invalid input for unique Hydrogen, only true or false is allowed." << std::endl;
+            std::cout << "Using default value: true" << std::endl;
         }
     }
-    std::string fileout = "combined_out.sdf";
-    SDWriter writer(fileout);
-    for( std::size_t i = 0 , is = all_combined.size() ; i < is ; ++i ) {
-        writer.write( *mols[i] );
-    }
-
-
-    // std::shared_ptr<ROMol> combined( connectMols( *lig, *frag, 
-    //     id_ligH, id_ligNbr, id_fragH, id_fragNbr ));
-
-    // std::cout<< lig->getNumAtoms() << std::endl;
-    // std::cout<< combined->getNumAtoms() << std::endl;
     
-    // std::ofstream ofs( "combined_out.sdf" );
-    // ofs << MolToMolBlock( *combined );
-
+    if (!std::filesystem::exists(out_path)){
+        std::filesystem::create_directory(out_path);
+        std::cout << "Directory created: "+out_path << std::endl;
+    }
+    
+    sdfEnumFuncH(lig_file, frag_file, out_path, unique);
+    
     return 0;
 }
