@@ -1,7 +1,5 @@
 #include <iostream>
-// #include <fstream>
 #include <filesystem>
-// #include <RDGeneral/Invariant.h>
 #include <GraphMol/GraphMol.h>
 #include <GraphMol/MolOps.h>
 // #include <GraphMol/SmilesParse/SmilesWrite.h>
@@ -14,13 +12,7 @@
 using namespace RDKit;
 
 typedef std::map<int, std::pair<int, int>> ORDER_DICT;
-typedef std::vector<std::shared_ptr<ROMol>> MOL_VEC;
-
-void print_map(std::map<int, std::pair<int, int>> m){
-    for (const auto& [key, value] : m) {
-        std::cout << key << " : " << value.first << ", " << value.second << std::endl;
-    }
-}
+typedef std::vector<std::shared_ptr<ROMol>> MOL_STDSPTR_VECT;
 
 ORDER_DICT findHIds(std::shared_ptr<RDKit::ROMol> mol, bool unique = true){
     std::vector<unsigned int> rank;
@@ -63,7 +55,7 @@ std::shared_ptr<ROMol> connectMols(std::shared_ptr<ROMol> lig, std::shared_ptr<R
         return std::shared_ptr<ROMol>( rw_lig );
 }
 
-MOL_VEC functionalizeH(std::shared_ptr<ROMol> lig,  
+MOL_STDSPTR_VECT functionalizeH(std::shared_ptr<ROMol> lig,  
     std::shared_ptr<ROMol> frag, bool unique = true)
     /*
     Functionalize the ligand with a fragment on all unique positions of hydrogen atoms
@@ -75,22 +67,22 @@ MOL_VEC functionalizeH(std::shared_ptr<ROMol> lig,
         ORDER_DICT orders_lig = findHIds(lig, unique);
         ORDER_DICT orders_frag = findHIds(frag, true);
 
-        MOL_VEC all_combined;
+        MOL_STDSPTR_VECT cur_combined;
         for (ORDER_DICT::iterator it=orders_lig.begin(); it!=orders_lig.end(); ++it){
             for (ORDER_DICT::iterator jt=orders_frag.begin(); jt!=orders_frag.end(); ++jt){
-                all_combined.push_back( connectMols(lig, frag, 
+                cur_combined.push_back( connectMols(lig, frag, 
                 it->second.first, it->second.second, 
                 jt->second.first, jt->second.second) );
             }
         }
-        return all_combined;
+        return cur_combined;
 }
 
 void sdfEnumFuncH(std::string lig_file, std::string frag_file, std::string out_path, bool unique=true){
     if (std::filesystem::exists(out_path)){
         bool takeOwnership = true;
         bool removeHs = false;
-        MOL_VEC ligs;
+        MOL_STDSPTR_VECT ligs;
         SDMolSupplier lig_supplier( lig_file , takeOwnership , removeHs );
         while( !lig_supplier.atEnd() ) {
             std::shared_ptr<RDKit::ROMol> lig( lig_supplier.next() );
@@ -99,7 +91,7 @@ void sdfEnumFuncH(std::string lig_file, std::string frag_file, std::string out_p
             }
         }
 
-        MOL_VEC frags;
+        MOL_STDSPTR_VECT frags;
         SDMolSupplier frag_supplier( frag_file , takeOwnership , removeHs );
         while( !frag_supplier.atEnd() ) {
             std::shared_ptr<RDKit::ROMol> frag( frag_supplier.next() );
@@ -110,7 +102,7 @@ void sdfEnumFuncH(std::string lig_file, std::string frag_file, std::string out_p
 
         for (std::size_t i=0, is=ligs.size(); i<is; i++){
             for (std::size_t j=0, js=frags.size(); j<js; j++){
-                MOL_VEC combined = functionalizeH( ligs[i], frags[j], unique );
+                MOL_STDSPTR_VECT combined = functionalizeH( ligs[i], frags[j], unique );
                 std::string fname = "combined_"+std::to_string(i)+"_"+std::to_string(j)+".sdf";
                 std::string fileout = out_path+"/"+fname;
                 SDWriter writer(fileout);
