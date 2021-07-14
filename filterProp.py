@@ -16,7 +16,14 @@ from itertools import repeat
 class PropFilter:
     '''
     Construct a filtering dict with lambda expression for each mol property
-    Take input from a dict with 
+    Take input from a dict with filter names (key) followed by a list of relational expressions (value)
+    e.g. {'SAS': ["<3"], 'LogP': [">2", "<3"]}
+    
+    Available Filters: 
+        SAS  - Sythetic Accessibility
+        QED  - Quantitative Estimate of Druglikeness
+        MolWeight - Molecular Weight
+        LogP - Octanol-Water Partition Coefficient
     '''
     # Available filters listed below
     # To add a filter, simply give it a name as the key, and use the name of the function as the value
@@ -191,33 +198,37 @@ def sdfFilter(propfilter, sdfile_list, outpath, onefile: bool):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(prog="filterProps",
+                                formatter_class=argparse.RawDescriptionHelpFormatter,
                                 description=
-                                '''
-                                Chemicophysical Filter for Molecules
-                                Filter molecules in the sdf files based on the criterial specified
-                                Multiple sdf files are allowed as input
-                                Write the filtered mols in individual sdf files with prefix "filtered_" on their respective file names. 
-                                Or combine the output into a single sdf file if --onefile is specified
-                                
-                                Available Filters: 
-                                SAS  - Sythetic Accessibility
-                                QED  - Quantitative Estimate of Druglikeness
-                                MW   - Molecular Weight
-                                LogP - Octanol-Water Partition Coefficient
-                                
-                                Filter criteria should start with relational signs, such as ">", "<", ">=", or "<=",
-                                , followed by numerical values, and surrounded by quotation marks
-                                To specify both upper and lower bound, use two expressions separated by space
-                                e.g, for Molecular Weight x: 300 < x < 500, use --MW "<500" ">300"
-                                
-                                Usage Example:
-                                1.  Process all sdf files in the current directory and write the filtered mols to ./filtered_mols
-                                    filtered by SAS<6, MolWeight<=300, and QED>0.7
-                                        python filterProp.py -i ./*.sdf -o ./filtered_mols --SAS "<6" --MW "<=300" --QED ">0.7"
-                                2.  Filter out ligands.sdf and write to current directory as filtered_ligands.sdf (default)
-                                    filtered by MolWeight x: 300 < x < 500, LogP x: 2 <= x <= 3
-                                        python filterProp.py -i ligands.sdf --MW ">300 <500" --LogP "<3 >2"
-                                '''
+'''
+  Physicochemical Filters for Molecules
+    Filter molecules in the sdf files based on the criterial specified
+    Multiple sdf files are allowed as input
+    Write the filtered mols in individual sdf files with prefix "filtered_" on their respective file names.
+    Or combine the output into a single sdf file if --onefile is specified
+
+  Available Filters: 
+    SAS  - Sythetic Accessibility
+    QED  - Quantitative Estimate of Druglikeness
+    MW   - Molecular Weight
+    LogP - Octanol-Water Partition Coefficient
+    
+    Filter criteria should start with relational signs, such as ">", "<", ">=", or "<=",
+    , followed by numerical values, and surrounded by quotation marks
+    To specify both upper and lower bound, use two expressions separated by space.
+    e.g, for Molecular Weight x: 300 < x < 500, use --MW "<500" ">300"
+
+  Usage Example:
+    1.  Process all sdf files in the current directory and write the filtered mols to ./filtered_mols
+        filtered by SAS<6, MolWeight<=300, and QED>0.7
+        
+        python filterProp.py -i ./*.sdf -o ./filtered_mols --SAS "<6" --MW "<=300" --QED ">0.7"
+            
+    2.  Filter out ligands.sdf and write to current directory as filtered_ligands.sdf (default)
+        filtered by MolWeight x: 300 < x < 500, LogP x: 2 <= x <= 3
+        
+        python filterProp.py -i ligands.sdf --MW ">300 <500" --LogP "<3 >2"
+'''
                                 )
     parser.add_argument('-i','--infile', action="extend", nargs="+", type=str,
                         help='ligand .sdf file path')
