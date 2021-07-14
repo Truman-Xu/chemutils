@@ -227,7 +227,7 @@ if __name__ == "__main__":
     2.  Filter out ligands.sdf and write to current directory as filtered_ligands.sdf (default)
         filtered by MolWeight x: 300 < x < 500, LogP x: 2 <= x <= 3
         
-        python filterProp.py -i ligands.sdf --MW ">300 <500" --LogP "<3 >2"
+        python filterProp.py -i ligands.sdf --MW ">300" "<500" --LogP "<3" ">2"
 '''
                                 )
     parser.add_argument('-i','--infile', action="extend", nargs="+", type=str,
