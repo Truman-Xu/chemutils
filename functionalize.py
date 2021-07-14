@@ -48,7 +48,9 @@ def connectMols(lig, frag, id_ligH, id_ligNbr, id_fragH, id_fragNbr):
     emol.RemoveAtom(id_fragH + lig.GetNumAtoms())
     emol.RemoveAtom(id_ligH)
     # return the immutable mol object
-    return emol.GetMol()
+    mol_out = emol.GetMol()
+    Chem.SanitizeMol(mol_out)
+    return mol_out
 
 def functionalizeH(lig, frag, unique_H: bool = True):
     '''
@@ -57,7 +59,7 @@ def functionalizeH(lig, frag, unique_H: bool = True):
     for forming the bonds. 
     Return a list of functionalized ligand
     '''
-    fused = []
+    fused_list = []
     # get combination of positions of hydrogens from both lig and frag
     # only unique hydrogens position will be used on the fragament
     combos = product(findHIds(lig, unique_H).values(), findHIds(frag, True).values())
@@ -67,72 +69,103 @@ def functionalizeH(lig, frag, unique_H: bool = True):
         # create a new copy (deep copy) of the mols
         cur_lig = copy.deepcopy(lig)
         cur_frag = copy.deepcopy(frag)
-        fused.append(connectMols(cur_lig, cur_frag, id_ligH, id_ligNbr, id_fragH, id_fragNbr)) 
-    return fused
+        fused = connectMols(cur_lig, cur_frag, id_ligH, id_ligNbr, id_fragH, id_fragNbr)
+        fused_list.append(fused) 
+    return fused_list
     
 def _FuncHWrapper(args):
     return functionalizeH(*args[0], unique_H = args[1])
 
-def enumFuncH(lig_list, frag_list, unique_H: bool = True):
+def combinatorialFunc(lig_list, frag_list, unique_H: bool = True):
     '''
     Enumerated all the functionalized molecules 
     from a list of ligand and a list of fragment
-    Return a list of lists with format 
+    Return a 3D list of lists with format 
     [[lig1-frag1, lig1-frag2, ..., lig1-fragN],
      [lig2-frag1, lig2-frag2, ..., lig2-fragN],
      ...
      [ligN-frag1, ligN-frag2, ..., ligN-fragN]]
+     where lig_i-frag_j is a list of mols fused on various hydrogen positions
     '''
     args = list(zip(product(lig_list, frag_list), repeat(unique_H)))
     fused = process_map(
             _FuncHWrapper,
             args,
-            chunksize = 5
+            chunksize = 100
         )
     return fused
 
-def sdfEnumFuncH(lig_path, frag_path, out_path, unique_H: bool = True):
+def _sdfFuncWrapper(args):
     '''
-    Enumerated all the functionalized molecules 
-    from .sdf ligand file and .sdf fragment file 
+    Function wrapper for multiprocessing on functionalization and writing to file
+    each thread processes one ligand and write to file
+    '''
+    lig_idx, lig, frags, path_template, unique_H = args
+    # get combination of positions of hydrogens from both lig and frag
+    # only unique hydrogens position will be used on the fragament
+    for frag_idx, frag in enumerate(frags):
+        combos = product(findHIds(lig, unique_H).values(), findHIds(frag, True).values())
+        file_path = path_template.format(lig_idx, frag_idx)
+        with open(file_path, 'w') as f:
+            w = Chem.SDWriter(f)
+            for combo in combos:
+                id_ligH, id_ligNbr = combo[0]
+                id_fragH, id_fragNbr = combo[1]
+                # create a new copy (deep copy) of the mols
+                cur_lig = copy.deepcopy(lig)
+                cur_frag = copy.deepcopy(frag)
+                w.write(connectMols(cur_lig, cur_frag, id_ligH, id_ligNbr, id_fragH, id_fragNbr)) 
+            w.close()
+
+def sdfCombinatorialFunc(lig_path, frag_path, out_path, unique_H: bool = True):
+    '''
+    Enumerated all the combinatorial of ligands and fragments on all H positions and functionalize the pairs
+    Takes input from .sdf ligand file and .sdf fragment file 
     Files can contain multiple ligands or fragments to be connected
     Save the fused molecules in sdf files with presevation of ligands 3D coordinates
+    Multithreaded: each thread processes one ligand and write to files
     '''
     if os.path.exists(out_path): 
+        # Determined the file path and set file name template
+        lig_name = os.path.split(lig_path)[-1].split('.')[0]
+        out_file_template = lig_name+'_combined_{}_{}.sdf'
+        out_path_template = os.path.join(out_path, out_file_template)
+        
         ligs = [m for m in Chem.SDMolSupplier(lig_path, removeHs = False)]
         frags = [m for m in Chem.SDMolSupplier(frag_path, removeHs = False)]
-        # generate a list of the functioanlized molecules
-        results = enumFuncH(ligs, frags, unique_H)
-        # create a list of tuples with ids of ligand and fragment pair 
-        # for list of the functioanlized molecules
-        ids = list(product(range(len(ligs)), range(len(frags))))
-        # save the molecules by ligand_fragment indices
-        for i, fused in zip(ids, results):
-            file_path = os.path.join(out_path, 'combined_{}_{}.sdf'.format(*i))
-            with open(file_path, 'w') as f:
-                w = Chem.SDWriter(f)
-                for mol in fused:
-                    w.write(mol)
-                w.close()
+
+        args = list((i, lig, frags, out_path_template, unique_H) for i, lig in enumerate(ligs))
+        fused = process_map(
+            _sdfFuncWrapper,
+            args,
+            chunksize = 1
+        )
+        print(len(ligs)*len(frags),"ligand-fragment pair processed.")
     else: 
         raise FileNotFoundError("Directory doesn't exist:", out_path)
         
 if __name__ == "__main__":
     
     import argparse
-    parser = argparse.ArgumentParser(description='Ligand-Fragment Functionalization')
+    parser = argparse.ArgumentParser(description=
+                                     '''
+                                     Ligand-Fragment Functionalization
+                                     DETAILS TO BE FILLED HERE
+                                     '''
+                                    )
     parser.add_argument('-l','--lig', type=str,
                         help='ligand .sdf file path')
     parser.add_argument('-f','--frag', type=str,
                         help='fragment .sdf file path')
-    parser.add_argument('-o','--out', type=str,
-                        help='directory path for file output')
-    parser.add_argument('--unique', type=bool, default=True,
-                        help='only form bond to symmetrically unique hydrogens. Default to True')
+    parser.add_argument('-o','--outpath', type=str, default="./",
+                        help='Directory path for file output. Default to the current directory')
+    parser.add_argument('--allH', action='store_true', default=False,
+                        help='Replace on all hydrogen positions. Without this flag, it only replace symmetrically unique hydrogens')
     args = parser.parse_args()
     
-    if not os.path.exists(args.out):
-        os.makedirs(args.out)
-        print('Directory Made:',args.out)
-    
-    sdfEnumFuncH(args.lig, args.frag, args.out, args.unique)
+    if not os.path.exists(args.outpath):
+        os.makedirs(args.outpath)
+        print('Directory Made:',args.outpath)
+        
+    uniqueH = not args.allH
+    sdfCombinatorialFunc(args.lig, args.frag, args.outpath, uniqueH)
