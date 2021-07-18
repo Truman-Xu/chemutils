@@ -26,8 +26,8 @@ class PropFilter:
         LogP - Octanol-Water Partition Coefficient
     '''
     # Available filters listed below
-    # To add a filter, simply give it a name as the key, and use the name of the function as the value
-    # The filter has to return a numerical value to be able to work in this filtering framework
+    # To add a filter, simply give it a name as the key, and the value should be the name of the function for calculating the property
+    # The function has to return a numerical value to be able to work in this filtering framework
     filterNames = {
         'MolWeight': MolWt, 
         'LogP': LogP, 
@@ -214,7 +214,7 @@ if __name__ == "__main__":
     LogP - Octanol-Water Partition Coefficient
     
     Filter criteria should start with relational signs, such as ">", "<", ">=", or "<=",
-    , followed by numerical values, and surrounded by quotation marks
+    followed by numerical values, and surrounded by quotation marks
     To specify both upper and lower bound, use two expressions separated by space.
     e.g, for Molecular Weight x: 300 < x < 500, use --MW "<500" ">300"
 
@@ -240,7 +240,7 @@ if __name__ == "__main__":
                         help='Sythetic Accessibility')
     parser.add_argument('--QED', '--qed', action="extend", nargs="+", type=str,
                         help='Quantitative Estimate of Druglikeness')
-    parser.add_argument('--MolWeight', '--MW', '--mw', '--MolWt', action="extend", nargs="+", type=str,
+    parser.add_argument('--MolWeight', '--MW', '--mw', action="extend", nargs="+", type=str,
                         help='Molecular Weight')
     parser.add_argument('--LogP', '--logP', '--logp', action="extend", nargs="+", type=str,
                         help='Octanol-Water Partition Coefficient')

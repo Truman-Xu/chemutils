@@ -1,8 +1,10 @@
 #include <iostream>
 #include <filesystem>
+#include <string>
 #include <GraphMol/GraphMol.h>
 #include <GraphMol/MolOps.h>
 #include <GraphMol/FileParsers/MolSupplier.h>
+#include <GraphMol/SmilesParse/SmilesWrite.h>
 #include <GraphMol/MolAlign/AlignMolecules.h>
 #include <GraphMol/new_canon.h>
 #include <GraphMol/FileParsers/MolWriters.h>
@@ -47,6 +49,24 @@ ORDER_DICT findHIds(std::shared_ptr<RDKit::ROMol> mol, bool unique = true){
     return orders;
 }
 
+void setTetherIdx(std::shared_ptr<ROMol> mol){
+    // Set the tethering atom index on the reference lig
+    // Mol props set here will be preserved when new is called for constructing 
+    // the new ligands
+    std::shared_ptr<RDKit::ROMol> mol2( MolOps::removeHs( *mol ));
+    // The atom index number to be tethered will be all atoms except hydrogen
+    int n_atoms = mol2->getNumAtoms();
+    // Construct a string of idx to be set on the mol prop
+    std::string tether_idx="1";
+    for (int i = 2; i <= n_atoms; i++){
+        tether_idx += ", ";
+        tether_idx += std::to_string(i);
+    }
+    // set prop for both versions of rdock
+    mol->setProp("rxdock.tethered_atoms", tether_idx);
+    mol->setProp("rdock.tethered_atoms", tether_idx);
+}
+
 std::shared_ptr<ROMol> connectMols(std::shared_ptr<ROMol> lig, std::shared_ptr<ROMol> frag, 
     int id_ligH, int id_ligNbr, int id_fragH, int id_fragNbr)
     /*
@@ -61,6 +81,7 @@ std::shared_ptr<ROMol> connectMols(std::shared_ptr<ROMol> lig, std::shared_ptr<R
         std::shared_ptr<RWMol> rw_frag( new RWMol( *frag ));
         // map the atom to be aligned from the two mols
         const MatchVectType id_map = {{id_fragH, id_ligNbr}, {id_fragNbr, id_ligH}};
+        // mol1->setProp( "rxdock.tethered_atoms", "cyclobutane" );
         // frag first and lig
         double _rmsd = MolAlign::alignMol(*rw_frag, *rw_lig, -1, -1, &id_map);
         // combine the two mols
@@ -69,22 +90,34 @@ std::shared_ptr<ROMol> connectMols(std::shared_ptr<ROMol> lig, std::shared_ptr<R
         // remove the hydrogens from the ligand and the fragment
         rw_lig->removeAtom( id_fragH + lig->getNumAtoms() );
         rw_lig->removeAtom( id_ligH );
+        // sanitize the combined mol 
+        try{
+            MolOps::sanitizeMol(*rw_lig);
+        } catch (MolSanitizeException &e){
+            std::cerr << "Fail to sanitize: " << MolToSmiles(*rw_lig) << std::endl;
+            std::cerr << e.what() << std::endl;
+        }
+        
         return std::shared_ptr<ROMol>( rw_lig );
 }
 
 MOL_STDSPTR_VECT functionalizeH(std::shared_ptr<ROMol> lig,  
-    std::shared_ptr<ROMol> frag, bool unique = true)
+    std::shared_ptr<ROMol> frag, bool unique = true, bool tether=false)
     /*
     Functionalize the ligand with a fragment on all unique positions of hydrogen atoms
     If unqiue flag is set to False, all hydrogen positions on the ligand will be used
     for forming the bonds. 
     Return a vector of ptrs of functionalized ligand
     */
+    // For a single lig-frag pair generation
     {
+        if (tether == true){
+            setTetherIdx(lig);
+        }
         ORDER_DICT orders_lig = findHIds(lig, unique);
         // only unique hydrogens position will be used on the fragament
         ORDER_DICT orders_frag = findHIds(frag, true);
-
+        
         MOL_STDSPTR_VECT cur_combined;
         for (ORDER_DICT::iterator it=orders_lig.begin(); it!=orders_lig.end(); ++it){
             for (ORDER_DICT::iterator jt=orders_frag.begin(); jt!=orders_frag.end(); ++jt){
@@ -97,14 +130,19 @@ MOL_STDSPTR_VECT functionalizeH(std::shared_ptr<ROMol> lig,
 }
 
 COMBINED_VECT_2D functionalize_lig(std::shared_ptr<ROMol> lig,  
-    MOL_STDSPTR_VECT  frags, bool unique = true)
+    MOL_STDSPTR_VECT  frags, bool unique = true, bool tether=false)
     /*
     Enumerated functionalized molecules for a single ligand ptrs 
     and a vector of fragment ptrs
-    Return a vector of shared_ptrs with format 
+    Return a 2D vector of shared_ptrs with format 
     {lig1-frag1, lig1-frag2, ..., lig1-fragN}
+    where each lig-frag pair is a vector of ptrs to functionalized ligands
     */
     {
+        if (tether == true){
+            setTetherIdx(lig);
+        }
+        // ligs H ids are determined here to avoid repition
         ORDER_DICT orders_lig = findHIds(lig, unique);
         COMBINED_VECT_2D lig_combined;
         for (std::shared_ptr<ROMol> frag: frags){
@@ -123,7 +161,8 @@ COMBINED_VECT_2D functionalize_lig(std::shared_ptr<ROMol> lig,
     return lig_combined;
 }
 
-COMBINED_VECT_3D combinatorialFunc(MOL_STDSPTR_VECT ligs, MOL_STDSPTR_VECT frags, bool unique = true){
+COMBINED_VECT_3D combinatorialFunc(MOL_STDSPTR_VECT ligs, MOL_STDSPTR_VECT frags,
+     bool unique = true, bool tether=false){
     /*
     Enumerated all the functionalized molecules 
     from a vector of ligand ptrs and a vector of fragment ptrs
@@ -139,7 +178,7 @@ COMBINED_VECT_3D combinatorialFunc(MOL_STDSPTR_VECT ligs, MOL_STDSPTR_VECT frags
 
     for (int i=0; i<is; i++){
         // multithreading: each thread takes on ligand and functionalize with all fragments
-        fs[i] = std::async(functionalize_lig, ligs[i], frags, unique);
+        fs[i] = std::async(functionalize_lig, ligs[i], frags, unique, tether);
     }
 
     for (int i=0; i<is; i++){
@@ -151,15 +190,21 @@ COMBINED_VECT_3D combinatorialFunc(MOL_STDSPTR_VECT ligs, MOL_STDSPTR_VECT frags
     return all_combined;
 }
 
-void _sdfCombinatorialWrapper(int lig_idx, std::shared_ptr<ROMol> lig, MOL_STDSPTR_VECT frags, std::string out_path, bool unique){
+void _sdfCombinatorialWrapper(int lig_idx, std::shared_ptr<ROMol> lig, MOL_STDSPTR_VECT frags, 
+    std::string out_path, bool unique, bool tether)
+    {
     /*
     Wrapper function to for better multithreading on sdfCombinatorialFunc()
     */
+    if (tether == true){
+        setTetherIdx(lig);
+    }
     ORDER_DICT orders_lig = findHIds(lig, unique);
     int frag_idx = 0;
 
     for (std::shared_ptr<ROMol> frag: frags){
         // only unique hydrogens position will be used on the fragament
+        
         ORDER_DICT orders_frag = findHIds(frag, true);
         std::string fname = "combined_"+std::to_string(lig_idx)+"_"+std::to_string(frag_idx)+".sdf";
         std::string fileout = out_path+"/"+fname;
@@ -179,7 +224,8 @@ void _sdfCombinatorialWrapper(int lig_idx, std::shared_ptr<ROMol> lig, MOL_STDSP
     }
 }
 
-void sdfCombinatorialFunc(std::string lig_file, std::string frag_file, std::string out_path, bool unique=true){
+void sdfCombinatorialFunc(std::string lig_file, std::string frag_file, std::string out_path, 
+    bool unique=true, bool tether=false){
     /*
     Enumerated all combinatorials of ligands and fragments for various H position for functionalization  
     Takes input from .sdf ligand file and .sdf fragment file 
@@ -213,7 +259,7 @@ void sdfCombinatorialFunc(std::string lig_file, std::string frag_file, std::stri
         int is = ligs.size();
         FUTURE_WRAPPER_VECT fs(is);
         for (int i=0; i<is; i++){
-            fs[i] = std::async(_sdfCombinatorialWrapper, i, ligs[i], frags, out_path, unique) ;
+            fs[i] = std::async(_sdfCombinatorialWrapper, i, ligs[i], frags, out_path, unique, tether);
         }
         // wait for jobs to finish
         for (int i=0; i<is; i++){
@@ -221,7 +267,7 @@ void sdfCombinatorialFunc(std::string lig_file, std::string frag_file, std::stri
         }
         std::cout << ligs.size()*frags.size() << " Ligand-Fragament pairs generated." << std::endl;
     } else {
-        std::cout << "[Aborted] File path not exists!" << std::endl;
+        std::cerr << "[Aborted] File path not exists!" << std::endl;
     }
 }
 
@@ -242,16 +288,16 @@ int main( int argc , char **argv ) {
             unique = false;
         } else {
             // Report invalid argument
-            std::cout << "Invalid input for unique Hydrogen, only true or false is allowed." << std::endl;
-            std::cout << "Using default value: true" << std::endl;
+            std::cerr << "Invalid input for unique Hydrogen, only true or false is allowed." << std::endl;
+            std::cerr << "Using default value: true" << std::endl;
         }
     }
-    
+    bool tether=true;
     if (!std::filesystem::exists(out_path)){
         std::filesystem::create_directory(out_path);
         std::cout << "Directory created: "+out_path << std::endl;
     }
 
-    sdfCombinatorialFunc(lig_file, frag_file, out_path, unique);
+    sdfCombinatorialFunc(lig_file, frag_file, out_path, unique, tether);
     return 0;
 }

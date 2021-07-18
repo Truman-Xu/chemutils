@@ -47,7 +47,8 @@ std::shared_ptr<ROMol> connectMols(std::shared_ptr<ROMol> lig, std::shared_ptr<R
         const MatchVectType id_map = {{id_fragH, id_ligNbr}, {id_fragNbr, id_ligH}};
         // frag first and lig
         double _rmsd = MolAlign::alignMol(*rw_frag, *rw_lig, -1, -1, &id_map);
-        
+        //
+        // mol1->setProp( "rxdock.tethered_atoms", "cyclobutane" ); 
         rw_lig->insertMol( *rw_frag );
         rw_lig->addBond( id_ligNbr, lig->getNumAtoms() + id_fragNbr, Bond::SINGLE );
         rw_lig->removeAtom( id_fragH + lig->getNumAtoms() );
