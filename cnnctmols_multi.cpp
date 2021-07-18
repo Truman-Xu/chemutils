@@ -10,8 +10,10 @@
 #include <GraphMol/FileParsers/MolWriters.h>
 #include <thread>
 #include <future>
+#include <boost/program_options.hpp>
 
 using namespace RDKit;
+namespace po = boost::program_options;
 
 typedef std::map<int, std::pair<int, int>> ORDER_DICT;
 typedef std::vector<std::shared_ptr<ROMol>> MOL_STDSPTR_VECT;
@@ -273,12 +275,29 @@ void sdfCombinatorialFunc(std::string lig_file, std::string frag_file, std::stri
 
 int main( int argc , char **argv ) {
     
+    std::string lig_file, frag_file, out_path;
+    po::options_description desc("Options for my program");
+    bool unique=true;
+    desc.add_options()
+        // Option 'buffer-size' and 'b' are equivalent.
+        ("buffer-size,b", po::value<std::string>(& lig_file),
+            "The buffer's size")
+        // Option 'priority' and 'p' are equivalent.
+        ("priority,p", po::value<std::string>(& frag_file),
+            "The priority")
+        // Option 'timeout' and 't' are equivalent.
+        ("timeout,t", po::value<std::string>(& out_path)->default_value("./out/"),
+            "Directory path for output files. Default to ./out")
+        ;
+
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
+ 
     for (int i = 0; i < argc; ++i)
         std::cout << argv[i] << "\n";
 
-    std::string lig_file = argv[1], frag_file = argv[2], out_path = argv[3];
 
-    bool unique=true;
     std::string isUnique;
     if(argc>3){
         isUnique = argv[4];
