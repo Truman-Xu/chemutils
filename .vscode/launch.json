@@ -11,10 +11,9 @@
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}",
             "args": [
-                "top10ligs.sdf",
-                "10_frag.sdf",
-                "./out",
-                "true"
+                "-l top10ligs.sdf",
+                "-f 10_frag.sdf",
+                "--tether"
             ],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

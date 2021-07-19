@@ -33,4 +33,6 @@
 
 # RDKit Examples
 example*
+out/
+tether_docking/
 

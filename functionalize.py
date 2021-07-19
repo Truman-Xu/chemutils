@@ -24,6 +24,13 @@ def findHIds(mol, unique: bool = True):
     ## return only one hydrogen per rank {order : (H index, Neighbor index)}
     return {orders[ids[0]] : ids for ids in H_neigh_ids}
 
+def setTetherIdx(mol):
+    mol2 = Chem.rdmolops.RemoveHs(mol)
+    idx_list = [str(i) for i in range(1, mol2.GetNumAtoms()+1)]
+    # set tethering atom ids for both versions of rdock
+    mol.SetProp('rxdock.tethered_atoms',', '.join(idx_list))
+    mol.SetProp('rdock.tethered_atoms',', '.join(idx_list))
+
 def connectMols(lig, frag, id_ligH, id_ligNbr, id_fragH, id_fragNbr):
     """
     Connect two mols whose hydrogens are aligned into position
@@ -52,13 +59,15 @@ def connectMols(lig, frag, id_ligH, id_ligNbr, id_fragH, id_fragNbr):
     Chem.SanitizeMol(mol_out)
     return mol_out
 
-def functionalizeH(lig, frag, unique_H: bool = True):
+def functionalizeH(lig, frag, unique_H: bool = True, tether: bool = False ):
     '''
     Functionalize the ligand with a fragment on all unique positions of hydrogen atoms
     If unqiue flag is set to False, all hydrogen positions on the ligand will be used
     for forming the bonds. 
     Return a list of functionalized ligand
     '''
+    # tether atom index set on the original ligand mol will be preserved when copied
+    if tether: setTetherIdx(lig)
     fused_list = []
     # get combination of positions of hydrogens from both lig and frag
     # only unique hydrogens position will be used on the fragament
@@ -74,9 +83,9 @@ def functionalizeH(lig, frag, unique_H: bool = True):
     return fused_list
     
 def _FuncHWrapper(args):
-    return functionalizeH(*args[0], unique_H = args[1])
+    return functionalizeH(*args[0], unique_H = args[1], tether=args[2])
 
-def combinatorialFunc(lig_list, frag_list, unique_H: bool = True):
+def combinatorialFunc(lig_list, frag_list, unique_H: bool = True, tether: bool = False):
     '''
     Enumerated all the functionalized molecules 
     from a list of ligand and a list of fragment
@@ -87,7 +96,7 @@ def combinatorialFunc(lig_list, frag_list, unique_H: bool = True):
      [ligN-frag1, ligN-frag2, ..., ligN-fragN]]
      where lig_i-frag_j is a list of mols fused on various hydrogen positions
     '''
-    args = list(zip(product(lig_list, frag_list), repeat(unique_H)))
+    args = list(zip(product(lig_list, frag_list), repeat(unique_H), repeat(tether)))
     fused = process_map(
             _FuncHWrapper,
             args,
@@ -100,7 +109,9 @@ def _sdfFuncWrapper(args):
     Function wrapper for multiprocessing on functionalization and writing to file
     each thread processes one ligand and write to file
     '''
-    lig_idx, lig, frags, path_template, unique_H = args
+    lig_idx, lig, frags, path_template, unique_H, tether = args
+    # tether atom index set on the original ligand mol will be preserved when copied 
+    if tether: setTetherIdx(lig)
     # get combination of positions of hydrogens from both lig and frag
     # only unique hydrogens position will be used on the fragament
     for frag_idx, frag in enumerate(frags):
@@ -117,7 +128,7 @@ def _sdfFuncWrapper(args):
                 w.write(connectMols(cur_lig, cur_frag, id_ligH, id_ligNbr, id_fragH, id_fragNbr)) 
             w.close()
 
-def sdfCombinatorialFunc(lig_path, frag_path, out_path, unique_H: bool = True):
+def sdfCombinatorialFunc(lig_path, frag_path, out_path, unique_H: bool = True, tether: bool = False):
     '''
     Enumerated all the combinatorial of ligands and fragments on all H positions and functionalize the pairs
     Takes input from .sdf ligand file and .sdf fragment file 
@@ -134,7 +145,7 @@ def sdfCombinatorialFunc(lig_path, frag_path, out_path, unique_H: bool = True):
         ligs = [m for m in Chem.SDMolSupplier(lig_path, removeHs = False)]
         frags = [m for m in Chem.SDMolSupplier(frag_path, removeHs = False)]
 
-        args = list((i, lig, frags, out_path_template, unique_H) for i, lig in enumerate(ligs))
+        args = list((i, lig, frags, out_path_template, unique_H, tether) for i, lig in enumerate(ligs))
         fused = process_map(
             _sdfFuncWrapper,
             args,
@@ -157,10 +168,20 @@ if __name__ == "__main__":
                         help='ligand .sdf file path')
     parser.add_argument('-f','--frag', type=str,
                         help='fragment .sdf file path')
-    parser.add_argument('-o','--outpath', type=str, default="./",
-                        help='Directory path for file output. Default to the current directory')
+    parser.add_argument('-o','--outpath', type=str, default="./out",
+                        help='Directory path for file output. Default to the ./out')
     parser.add_argument('--allH', action='store_true', default=False,
-                        help='Replace on all hydrogen positions. Without this flag, it only replace symmetrically unique hydrogens')
+                        help='''
+                        Attach to all Hydrogen position instead of symmetrically unique ones. \n
+                        Without this flag, it only replace symmetrically unique hydrogens
+                        ''')
+    parser.add_argument('--tether', action='store_true', default=False,
+                        help='''
+                        Set the tether docking atom ids for the functionalized ligand.\n
+                        If the flag is present, the atoms from the ligand will be fixed during docking, 
+                        and only the fragment parts are allowed to move freely.\n
+                        Default to no tethering (without this flag)
+                        ''')
     args = parser.parse_args()
     
     if not os.path.exists(args.outpath):
@@ -168,4 +189,4 @@ if __name__ == "__main__":
         print('Directory Made:',args.outpath)
         
     uniqueH = not args.allH
-    sdfCombinatorialFunc(args.lig, args.frag, args.outpath, uniqueH)
+    sdfCombinatorialFunc(args.lig, args.frag, args.outpath, uniqueH, args.tether)

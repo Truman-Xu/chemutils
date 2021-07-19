@@ -16,6 +16,7 @@
                 "-lRDKitRDGeneral",
                 "-lRDKitDepictor",
                 "-lRDKitMolAlign",
+                "-lboost_program_options",
                 // "-lRDKitForceFieldHelpers",
                 // "-lRDKitForceField",
                 // "-lRDKitDistGeomHelpers",
@@ -23,7 +24,8 @@
                 // "-lRDKitMolDraw2D",
                 // "-lboost_iostreams",
                 "-L/home/truman/rdkit-Release_2021_03_3/lib",
-                "-pthread"
+                "-pthread",
+                "-Wall"
             ],
             "options": {
                 "cwd": "${fileDirname}"
