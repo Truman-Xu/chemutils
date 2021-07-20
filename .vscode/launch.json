@@ -11,8 +11,10 @@
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}",
             "args": [
-                "-l top10ligs.sdf",
-                "-f 10_frag.sdf",
+                "-l",
+                "${fileDirname}/top10ligs.sdf",
+                "-f",
+                "${fileDirname}/10_frag.sdf",
                 "--tether"
             ],
             "stopAtEntry": false,
@@ -28,6 +30,60 @@
                 }
             ],
             "preLaunchTask": "C/C++: g++ build rdkit file",
+            "miDebuggerPath": "/usr/bin/gdb"
+        },
+        {
+            "name": "clang++ - Build and debug active file",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${fileDirname}/${fileBasenameNoExtension}",
+            "args": [
+                "-l",
+                "${fileDirname}/top10ligs.sdf",
+                "-f",
+                "${fileDirname}/10_frag.sdf",
+                "--tether"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "C/C++: clang build rdkit file",
+            "miDebuggerPath": "/usr/bin/gdb"
+        },
+        {
+            "name": "clang++ conda lib - Build and debug active file",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${fileDirname}/${fileBasenameNoExtension}",
+            "args": [
+                "-l",
+                "${fileDirname}/top10ligs.sdf",
+                "-f",
+                "${fileDirname}/10_frag.sdf",
+                "--tether"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "C/C++: clang build from conda rdkit file",
             "miDebuggerPath": "/usr/bin/gdb"
         }
     ]
