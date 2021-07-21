@@ -30,9 +30,12 @@
 *.exe
 *.out
 *.app
+bin/
 
 # RDKit Examples
 example*
 out/
 tether_docking/
 
+# Ipynb checkpoints
+.ipynb_checkpoints/
