@@ -60,15 +60,15 @@
             "miDebuggerPath": "/usr/bin/gdb"
         },
         {
-            "name": "clang++ conda lib - Build and debug active file",
+            "name": "clang++ conda lib - Build and debug",
             "type": "cppdbg",
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}",
             "args": [
                 "-l",
-                "${fileDirname}/top10ligs.sdf",
+                "${fileDirname}/../data/top10ligs.sdf",
                 "-f",
-                "${fileDirname}/10_frag.sdf",
+                "${fileDirname}/../data/10_frag.sdf",
                 "--tether"
             ],
             "stopAtEntry": false,
@@ -83,7 +83,27 @@
                     "ignoreFailures": true
                 }
             ],
-            "preLaunchTask": "C/C++: clang build from conda rdkit file",
+            "preLaunchTask": "C/C++: clang build from lib",
+            "miDebuggerPath": "/usr/bin/gdb"
+        },
+        {
+            "name": "clang++ conda lib - Build lib",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${fileDirname}/${fileBasenameNoExtension}",
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "C/C++: clang build library from conda rdkit file",
             "miDebuggerPath": "/usr/bin/gdb"
         }
     ]

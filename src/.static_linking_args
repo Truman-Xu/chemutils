@@ -1,0 +1,1 @@
+g++ -g /home/truman/chemutils/cnnctmols_multi.cpp -o /home/truman/chemutils/functionalize -std=c++17 -pthread -Wl,--start-group /home/truman/rdkit-Release_2021_03_3/lib/*_static.a -Wl,--end-group -lrt -Wl,--whole-archive -lpthread -Wl,--no-whole-archive -static
