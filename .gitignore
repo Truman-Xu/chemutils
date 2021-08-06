@@ -42,3 +42,6 @@ tether_docking/
 
 # Ipynb checkpoints
 .ipynb_checkpoints/
+
+# VS Code workspace
+*.code-workspace
