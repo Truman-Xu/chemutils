@@ -8,6 +8,7 @@ import copy
 from itertools import product, repeat
 from tqdm.contrib.concurrent import process_map
 import os
+from filterProp import PropFilter
 
 def findHIds(mol, unique: bool = True):
     '''
@@ -85,7 +86,7 @@ def functionalizeH(lig, frag, unique_H: bool = True, tether: bool = False ):
 def _FuncHWrapper(args):
     return functionalizeH(*args[0], unique_H = args[1], tether=args[2])
 
-def combinatorialFunc(lig_list, frag_list, unique_H: bool = True, tether: bool = False):
+def combinatorialFunc(lig_list, frag_list, propfilter, unique_H: bool = True, tether: bool = False):
     '''
     Enumerated all the functionalized molecules 
     from a list of ligand and a list of fragment
@@ -102,33 +103,40 @@ def combinatorialFunc(lig_list, frag_list, unique_H: bool = True, tether: bool =
             args,
             chunksize = 100
         )
-    return fused
+    return propfilter.filterMols(fused, show_tqdm = False)
 
 def _sdfFuncWrapper(args):
     '''
     Function wrapper for multiprocessing on functionalization and writing to file
     each thread processes one ligand and write to file
     '''
-    lig_idx, lig, frags, path_template, unique_H, tether = args
+    lig_idx, lig, frags, path_template, propfilter, unique_H, tether = args
     # tether atom index set on the original ligand mol will be preserved when copied 
     if tether: setTetherIdx(lig)
     # get combination of positions of hydrogens from both lig and frag
     # only unique hydrogens position will be used on the fragament
     for frag_idx, frag in enumerate(frags):
         combos = product(findHIds(lig, unique_H).values(), findHIds(frag, True).values())
-        file_path = path_template.format(lig_idx, frag_idx)
-        with open(file_path, 'w') as f:
-            w = Chem.SDWriter(f)
-            for combo in combos:
-                id_ligH, id_ligNbr = combo[0]
-                id_fragH, id_fragNbr = combo[1]
-                # create a new copy (deep copy) of the mols
-                cur_lig = copy.deepcopy(lig)
-                cur_frag = copy.deepcopy(frag)
-                w.write(connectMols(cur_lig, cur_frag, id_ligH, id_ligNbr, id_fragH, id_fragNbr)) 
-            w.close()
+        fused_mols = []
+        for combo in combos:
+            id_ligH, id_ligNbr = combo[0]
+            id_fragH, id_fragNbr = combo[1]
+            # create a new copy (deep copy) of the mols
+            cur_lig = copy.deepcopy(lig)
+            cur_frag = copy.deepcopy(frag)
+            fused_mols.append(connectMols(cur_lig, cur_frag, id_ligH, id_ligNbr, id_fragH, id_fragNbr))
+        out_mols = propfilter.filterMols(fused_mols, show_tqdm = False)
+        if len(out_mols) > 0:
+            file_path = path_template.format(lig_idx, frag_idx)
+            with open(file_path, 'w') as f:
+                w = Chem.SDWriter(f)
+                for m in out_mols:
+                    w.write(m) 
+                w.close()
+        # else:
+        #     print("Ligand {} and Fragment {} have no product that meets filtering criteria".format(lig_idx, frag_idx))
 
-def sdfCombinatorialFunc(lig_path, frag_path, out_path, unique_H: bool = True, tether: bool = False):
+def sdfCombinatorialFunc(lig_path, frag_path, out_path, propfilter, unique_H: bool = True, tether: bool = False):
     '''
     Enumerated all the combinatorial of ligands and fragments on all H positions and functionalize the pairs
     Takes input from .sdf ligand file and .sdf fragment file 
@@ -145,7 +153,7 @@ def sdfCombinatorialFunc(lig_path, frag_path, out_path, unique_H: bool = True, t
         ligs = [m for m in Chem.SDMolSupplier(lig_path, removeHs = False)]
         frags = [m for m in Chem.SDMolSupplier(frag_path, removeHs = False)]
 
-        args = list((i, lig, frags, out_path_template, unique_H, tether) for i, lig in enumerate(ligs))
+        args = list((i, lig, frags, out_path_template, propfilter, unique_H, tether) for i, lig in enumerate(ligs))
         fused = process_map(
             _sdfFuncWrapper,
             args,
@@ -156,14 +164,40 @@ def sdfCombinatorialFunc(lig_path, frag_path, out_path, unique_H: bool = True, t
         raise FileNotFoundError("Directory doesn't exist:", out_path)
         
 if __name__ == "__main__":
-    
+    import sys
     import argparse
-    parser = argparse.ArgumentParser(description=
-                                     '''
-                                     Ligand-Fragment Functionalization
-                                     DETAILS TO BE FILLED HERE
-                                     '''
+
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=
+'''
+Ligand-Fragment Functionalization
+DETAILS TO BE FILLED HERE
+
+Available Filters: 
+    SAS  - Sythetic Accessibility
+    QED  - Quantitative Estimate of Druglikeness
+    MW   - Molecular Weight
+    LogP - Octanol-Water Partition Coefficient
+    
+    Filter criteria should start with relational signs, such as ">", "<", ">=", or "<=",
+    followed by numerical values, and surrounded by quotation marks
+    To specify both upper and lower bound, use two expressions separated by space.
+    e.g, for Molecular Weight x: 300 < x < 500, use --MW "<500" ">300"
+
+Usage Example:
+DETAILS TO BE FILLED HERE
+'''
                                     )
+    # define extend action for argparse for python version lower than 3.8
+    if sys.version_info.major == 3 and sys.version_info.minor < 8:
+        class ExtendAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                items = getattr(namespace, self.dest) or []
+                items.extend(values)
+                setattr(namespace, self.dest, items)
+        parser.register('action', 'extend', ExtendAction)
+
     parser.add_argument('-l','--lig', type=str,
                         help='ligand .sdf file path')
     parser.add_argument('-f','--frag', type=str,
@@ -182,11 +216,28 @@ if __name__ == "__main__":
                         and only the fragment parts are allowed to move freely.\n
                         Default to no tethering (without this flag)
                         ''')
+    # options for property filters 
+    parser.add_argument('--SAS', '--sas', action="extend", nargs="+", 
+                        help='Sythetic Accessibility')
+    parser.add_argument('--QED', '--qed', action="extend", nargs="+", type=str,
+                        help='Quantitative Estimate of Druglikeness')
+    parser.add_argument('--MolWeight', '--MW', '--mw', action="extend", nargs="+", type=str,
+                        help='Molecular Weight')
+    parser.add_argument('--LogP', '--logP', '--logp', action="extend", nargs="+", type=str,
+                        help='Octanol-Water Partition Coefficient')
+
     args = parser.parse_args()
     
     if not os.path.exists(args.outpath):
         os.makedirs(args.outpath)
         print('Directory Made:',args.outpath)
         
+    pf = PropFilter(args.__dict__)
+    if len(pf.filter_expr) == 0:
+        print("No filter set for output mols")
+    else:
+        print('Filters set as below:')
+        print(pf.filter_expr)
+
     uniqueH = not args.allH
-    sdfCombinatorialFunc(args.lig, args.frag, args.outpath, uniqueH, args.tether)
+    sdfCombinatorialFunc(args.lig, args.frag, args.outpath, pf, uniqueH, args.tether)

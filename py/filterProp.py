@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from rdkit import Chem
+from rdkit.Chem.PropertyMol import PropertyMol
 from rdkit.Chem import RDConfig # Allow Contrib packages to be used
 from rdkit.Chem.Crippen import MolLogP as LogP # Lipophilicity
 from rdkit.Chem.QED import default as QED # Quantitiative Estimate of Drug-likeness
@@ -35,8 +36,8 @@ class PropFilter:
         'SAS': SAS
     }
     
-    def __init__(self, filter_expr_dict):
-        self.filters, self.filter_expr = self._buildFilterDict(filter_expr_dict)
+    def __init__(self, cmd_args_dict):
+        self.filter_expr = self._buildFilterDict(cmd_args_dict)
         
     def _validateNum(self, sub_str):
         # Check if the value behind the relational symbols is numeric
@@ -85,26 +86,24 @@ class PropFilter:
             raise ValueError('\nConflict in lower and upper bound! \nInvalid range: {}'.format(args))
         
         # Create lambda function based on the expression
-        return eval('lambda x : '+ expression),  expression
+        return expression
 
-    def _buildFilterDict(self, filter_expr_dict):
-        # Create a dict with { filter name : lamdba function to check expression } t
+    def _buildFilterDict(self, cmd_args_dict):
+        # Create a dict with { filter name : lamdba function to check expression }
         # for filtering each mol property
-        filter_entries = []
         expressions = []
-        for key, args in filter_expr_dict.items():
-            if args and key in self.filterNames.keys():
-                ldfunc, expr = self._checkAndBuildFilter(args)
-                filter_entries.append((key, ldfunc))
+        for key, args in cmd_args_dict.items():
+            if args and (key in self.filterNames.keys()):
+                expr = self._checkAndBuildFilter(args)
                 expressions.append((key, expr))
-        return dict(filter_entries), dict(expressions)
+        return dict(expressions)
     
     @staticmethod
     def calcMolProps(mol):
         '''
         Calculate all available filter properties for a molecule
         Does not require instantiation of the class
-        Return a dict with all available mol properties for filtering
+        Return a dict with all available mol filter properties
         '''
         return dict((key, round(ldFunc(mol),3)) for key, ldFunc in PropFilter.filterNames.items())
     
@@ -114,9 +113,12 @@ class PropFilter:
         Return True if all passed and the properties will be assign to the mol object
         Return False if any of the filtering criteria is not met
         '''
-        for key in self.filters:
+        for key in self.filter_expr:
             prop_val = self.filterNames[key](mol)
-            if not self.filters[key](prop_val):
+            ## Multithreading does not work on lambda functions directly
+            ## due to the inability to pickle them
+            ## eval() method is used as work around
+            if not eval("(lambda x: {})(prop_val)".format(self.filter_expr[key])):
                 return False
             mol.SetDoubleProp(key, prop_val)
         return True
@@ -131,8 +133,9 @@ class PropFilter:
         else:
             return list(filter(self.passFilter, mol_list))
 
-def _sdfFilterWrapper(propfilter, sdfile_path):
-    mols = [m for m in Chem.SDMolSupplier(sdfile_path, removeHs = False) if m]
+def _sdfFilterWrapper(args):
+    propfilter, sdfile_path = args
+    mols = [PropertyMol(m) for m in Chem.SDMolSupplier(sdfile_path, removeHs = False) if m]
     return propfilter.filterMols(mols, False)
 
 def sdfFilter(propfilter, sdfile_list, outpath, onefile: bool):
@@ -151,21 +154,20 @@ def sdfFilter(propfilter, sdfile_list, outpath, onefile: bool):
     if len(sdfile_list) < 30:
         for i, file in enumerate(sdfile_list):
             print('Processing {} of {} sdf files'.format(i+1, len(sdfile_list)))
-            cur_mols = [m for m in Chem.SDMolSupplier(file, removeHs = False) if m]
+            cur_mols = [PropertyMol(m) for m in Chem.SDMolSupplier(file, removeHs = False) if m]
             out_mols.append(propfilter.filterMols(cur_mols, show_tqdm = True)) 
+                
     else:
-        ## Multithreading does not work due to the inability to pickle lambda functions
-        
-#         args = list(zip(repeat(propfilter), sdfile_list))
-#         out_mols = process_map(
-#             _sdfFilterWrapper,
-#             args,
-#             chunksize = 10
-#         )
+        args = list(zip(repeat(propfilter), sdfile_list))
+        out_mols = process_map(
+            _sdfFilterWrapper,
+            args,
+            chunksize = 10
+        )
 
-        for i, file in enumerate(tqdm(sdfile_list)):
-            cur_mols = [m for m in Chem.SDMolSupplier(file, removeHs = False) if m]
-            out_mols.append(propfilter.filterMols(cur_mols, show_tqdm = False)) 
+        # for i, file in enumerate(tqdm(sdfile_list)):
+        #     cur_mols = [m for m in Chem.SDMolSupplier(file, removeHs = False) if m]
+        #     out_mols.append(propfilter.filterMols(cur_mols, show_tqdm = False)) 
 
     if onefile:
         out_file = os.path.join(outpath, 'filtered.sdf')
@@ -227,9 +229,18 @@ if __name__ == "__main__":
     2.  Filter out ligands.sdf and write to current directory as filtered_ligands.sdf (default)
         filtered by MolWeight x: 300 < x < 500, LogP x: 2 <= x <= 3
         
-        python filterProp.py -i ligands.sdf --MW ">300" "<500" --LogP "<3" ">2"
+        python filterProp.py -i ligands.sdf --MW ">300" "<500" --LogP "<=3" ">=2"
 '''
                                 )
+    # define extend action for argparse for python version lower than 3.8
+    if sys.version_info.major == 3 and sys.version_info.minor < 8:
+        class ExtendAction(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                items = getattr(namespace, self.dest) or []
+                items.extend(values)
+                setattr(namespace, self.dest, items)
+        parser.register('action', 'extend', ExtendAction)
+
     parser.add_argument('-i','--infile', action="extend", nargs="+", type=str,
                         help='ligand .sdf file path')
     parser.add_argument('-o','--outpath', type=str, default="./",

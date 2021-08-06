@@ -32,6 +32,9 @@
 *.app
 bin/
 
+# Python
+__pycache__/
+
 # RDKit Examples
 example*
 out/
