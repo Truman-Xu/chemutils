@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem.PropertyMol import PropertyMol
 from rdkit.Chem import RDConfig # Allow Contrib packages to be used

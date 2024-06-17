@@ -2,7 +2,6 @@
 ## University of Michigan
 
 from rdkit import Chem
-from rdkit.Chem import AllChem, Draw
 from rdkit.Chem.rdMolAlign import AlignMol
 import copy
 from itertools import product, repeat
